@@ -19,8 +19,7 @@
  used instead as the connection delegate.
  
  */
-@interface SSLCertificatePinning : NSObject
-
+@interface SSLCertificatePinning:NSObject <UIAlertViewDelegate>
 
 /**
  Certificate pinning loading method
@@ -48,8 +47,10 @@
  */
 + (BOOL)verifyPinnedCertificateForTrust:(SecTrustRef)trust andDomain:(NSString*)domain;
 
-@end
++ (NSString*)getFingerprint:(NSData*)certData;
 
++ (void)promptUserForSubject:(NSString*)subject andFingerprint:(NSString*)fingerprint;
+@end
 
 /** Convenience class to automatically perform certificate pinning.
  
@@ -60,7 +61,15 @@
  connection is accessing is part of the server's certificate chain.
  
  */
+
 @interface SSLPinnedNSURLConnectionDelegate : NSObject
+
+- (void)connection:(NSURLConnection *)connection willSendRequestForAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge;
+
+@end
+
+
+@interface SSLPinnedNSURLConnectionDelegateWithUserInteraction : NSObject
 
 - (void)connection:(NSURLConnection *)connection willSendRequestForAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge;
 

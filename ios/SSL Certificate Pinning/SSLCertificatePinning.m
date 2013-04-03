@@ -1,10 +1,9 @@
 
 #import "SSLCertificatePinning.h"
-
+#import <CommonCrypto/CommonDigest.h>
 
 // All the pinned certificate are stored in this plist on the filesystem
 #define PINNED_KEYS_FILE_PATH "~/Library/SSLPins.plist"
-
 
 @implementation SSLCertificatePinning
 
@@ -13,7 +12,7 @@
     if (certificates == nil) {
         return NO;
     }
-    
+
     // Serialize the dictionary to a plist
     NSError *error;
     NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:certificates
@@ -24,7 +23,7 @@
         NSLog(@"Error serializing plist: %@", error);
         return NO;
     }
-    
+
     // Write the plist to a pre-defined location on the filesystem
     NSError *writeError;
     if ([plistData writeToFile:[@PINNED_KEYS_FILE_PATH stringByExpandingTildeInPath]
@@ -33,7 +32,7 @@
         NSLog(@"Error saving plist to the filesystem: %@", writeError);
         return NO;
     }
-    
+
     return YES;
 }
 
@@ -42,35 +41,35 @@
     if ((trust == NULL) || (domain == nil)) {
         return NO;
     }
-    
+
     // Deserialize the plist that contains our SSL pins
     NSDictionary *SSLPinsDict = [NSDictionary dictionaryWithContentsOfFile:[@PINNED_KEYS_FILE_PATH stringByExpandingTildeInPath]];
     if (SSLPinsDict == nil) {
         NSLog(@"Error accessing the SSL Pins plist at %@", @PINNED_KEYS_FILE_PATH);
         return NO;
     }
-    
+
     // Do we have a certificate pinned for that domain ?
     NSData *pinnedCertificate = [SSLPinsDict objectForKey:domain];
     if (pinnedCertificate == nil) {
         return NO;
     }
-    
+
     // Check each certificate in the trust object
     // Unfortunately the anchor/CA certificate cannot be accessed this way
     CFIndex certsNb = SecTrustGetCertificateCount(trust);
     for(int i=0;i<certsNb;i++) {
-        
+
         // Extract the certificate
         SecCertificateRef certificate = SecTrustGetCertificateAtIndex(trust, i);
         NSData* DERCertificate = (__bridge NSData*) SecCertificateCopyData(certificate);
-        
+
         // Compare the two certificates
         if ([pinnedCertificate isEqualToData:DERCertificate]) {
             return YES;
         }
     }
-    
+
     // Check the anchor/CA certificate separately
     SecCertificateRef anchorCertificate = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)(pinnedCertificate));
     if (anchorCertificate == NULL) {
@@ -82,7 +81,7 @@
         CFRelease(anchorCertificate);
         return NO;
     }
-    
+
     SecTrustResultType trustResult;
     SecTrustEvaluate(trust, &trustResult);
     if (trustResult == kSecTrustResultUnspecified) {
@@ -91,31 +90,60 @@
         return YES;
     }
     CFRelease(anchorCertificate);
-    
+
     // If we get here, we didn't find any matching certificate in the chain
     return NO;
 }
 
++ (NSString*)getFingerprint:(NSData*)certData {
+
+    unsigned char sha1Buffer[CC_SHA1_DIGEST_LENGTH]; 
+    CC_SHA1(certData.bytes, certData.length, sha1Buffer); 
+    NSMutableString *fingerprint = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 3]; 
+
+    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i) 
+        [fingerprint appendFormat:@"%02x:",sha1Buffer[i]];
+    return [fingerprint stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]; 
+}
+
++ (void)promptUserForSubject:(NSString*)subject andFingerprint:(NSString*)fingerprint {
+
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:[NSString stringWithFormat:@"Unknown certificate for %@", subject]
+                                                    message:[NSString stringWithFormat:@"Accept and save certificate with fingerprint %@?", fingerprint]
+                                                   delegate:self
+                                          cancelButtonTitle:@"Reject"
+                                          otherButtonTitles:@"Accept",nil];
+    [alert show];
+}
+
++ (BOOL)alertView:(UIAlertView *)alertView didDismissWithButtonIndex:(NSInteger)buttonIndex {
+
+    NSLog(@"Alert View dismissed with button at index %d",buttonIndex);
+    if (buttonIndex == 1) {
+        return YES;
+    }
+    else {
+        return NO;
+    }
+}
 
 @end
-
-
 
 @implementation SSLPinnedNSURLConnectionDelegate
 
 - (void)connection:(NSURLConnection *)connection willSendRequestForAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge {
-    
+
     if([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-        
+
         SecTrustRef serverTrust = [[challenge protectionSpace] serverTrust];
         NSString *domain = [[challenge protectionSpace] host];
         SecTrustResultType trustResult;
-        
+
         // Validate the certificate chain with the device's trust store anyway
         // This *might* give use revocation checking
         SecTrustEvaluate(serverTrust, &trustResult);
         if (trustResult == kSecTrustResultUnspecified) {
-            
+
             // Look for a pinned public key in the server's certificate chain
             if ([SSLCertificatePinning verifyPinnedCertificateForTrust:serverTrust andDomain:domain]) {
 
@@ -134,4 +162,49 @@
         }
     }
 }
+@end
+
+@implementation SSLPinnedNSURLConnectionDelegateWithUserInteraction
+
+- (void)connection:(NSURLConnection *)connection willSendRequestForAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge {
+
+    if([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+
+        SecTrustRef serverTrust = [[challenge protectionSpace] serverTrust];
+        NSString *domain = [[challenge protectionSpace] host];
+        SecTrustResultType trustResult;
+
+        // Validate the certificate chain with the device's trust store anyway
+        // This *might* give use revocation checking
+        SecTrustEvaluate(serverTrust, &trustResult);
+        if (trustResult == kSecTrustResultUnspecified) {
+
+            // Look for a pinned public key in the server's certificate chain
+            if ([SSLCertificatePinning verifyPinnedCertificateForTrust:serverTrust andDomain:domain]) {
+
+                // Found the certificate; continue connecting
+                [challenge.sender useCredential:[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]
+                     forAuthenticationChallenge:challenge];
+            }
+            else {
+
+                SecCertificateRef certRef = SecTrustGetCertificateAtIndex(serverTrust, 0);
+                CFDataRef certData = SecCertificateCopyData(certRef);
+                NSString *certFingerprint = [SSLCertificatePinning getFingerprint:(__bridge NSData *)(certData)];
+
+                if ([SSLCertificatePinning promptUserForSubject:domain andFingerprint:certFingerprint] == YES) {
+                    // add the cert to the store
+                }
+                else {
+                    [[challenge sender] cancelAuthenticationChallenge: challenge];
+                }
+            }
+        }
+    }
+    else {
+        // Certificate chain validation failed; cancel the connection
+        [[challenge sender] cancelAuthenticationChallenge: challenge];
+    }
+}
+
 @end

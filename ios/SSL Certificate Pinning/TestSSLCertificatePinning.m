@@ -59,14 +59,11 @@
     [connection3 start];
 }
 
-
-
 + (NSData*)loadCertificateFromFile:(NSString*)fileName {
     NSString *certPath = [[NSString alloc] initWithFormat:@"%@/%@", [[NSBundle mainBundle] bundlePath], fileName];
     NSData *certData = [[NSData alloc] initWithContentsOfFile:certPath];
     return certData;
 }
-
 
 @end
 

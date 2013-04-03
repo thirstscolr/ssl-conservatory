@@ -4,7 +4,7 @@
 
 
 #pragma mark Test Cases
-@interface TestSSLCertificatePinning : NSObject
+@interface TestSSLCertificatePinning : NSObject 
 
 + (void)startTest;
 
@@ -18,7 +18,8 @@
  We subclass SSLPinnedNSURLConnectionDelegate so that our test delegate automatically performs certificate pinning.
  
  */
-@interface NSURLConnectionDelegateTest : SSLPinnedNSURLConnectionDelegate <NSURLConnectionDelegate>
+//XXX @interface NSURLConnectionDelegateTest : SSLPinnedNSURLConnectionDelegate <NSURLConnectionDelegate>
+@interface NSURLConnectionDelegateTest : SSLPinnedNSURLConnectionDelegateWithUserInteraction <NSURLConnectionDelegate>
 
 - (void)connectionDidFinishLoading:(NSURLConnection *)connection;
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data;
